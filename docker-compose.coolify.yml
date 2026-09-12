@@ -1,0 +1,30 @@
+services:
+  app:
+    image: registry.digitalocean.com/chaimindregistry/rentgpu-space:latest
+    init: true
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      # The server binds whatever PORT says; the image hardcodes nothing.
+      PORT: 3000
+      # Coolify generates a public URL and routes it to this internal port.
+      # The numeric suffix must match the exposed port below.
+      SERVICE_URL_APP_3000: /
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:-}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
+      LOVABLE_CRON_SECRET: ${LOVABLE_CRON_SECRET:-}
+      LOVABLE_CRON_SECRET_PREVIOUS: ${LOVABLE_CRON_SECRET_PREVIOUS:-}
+    expose:
+      - "3000"
+    healthcheck:
+      # /healthz is liveness only; probing / would render the full app and drag
+      # Supabase availability into the container's restart decision.
+      test:
+        ["CMD", "wget", "--quiet", "--spider", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 30s
+    restart: unless-stopped

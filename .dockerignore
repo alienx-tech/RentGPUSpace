@@ -1,0 +1,13 @@
+.git
+.github
+.claude
+.codex
+.agents
+.env*
+!.env.example
+.next
+node_modules
+npm-debug.log*
+Dockerfile*
+docker-compose*.yml
+README.md
