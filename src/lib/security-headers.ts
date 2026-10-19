@@ -1,3 +1,5 @@
+import type { NextRequest } from "next/server";
+
 // Response hardening applied to every document response in proxy.ts.
 //
 // The CSP is deliberately permissive about inline scripts and styles: Next's
@@ -41,7 +43,7 @@ function scriptSrc(): string {
     : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
 }
 
-function buildCsp(): string {
+function buildCsp(secure: boolean): string {
   return [
     "default-src 'self'",
     "base-uri 'self'",
@@ -55,15 +57,31 @@ function buildCsp(): string {
     `connect-src ${connectSources().join(" ")}`,
     "worker-src 'self' blob:",
     "manifest-src 'self'",
-    "upgrade-insecure-requests",
+    // Only when the document itself arrived over TLS. On a plain-HTTP origin
+    // this directive upgrades every subresource to https://, so a deployment
+    // whose TLS is missing or self-signed (a bare IP host, an sslip.io name
+    // with no issued certificate) fails to load its own chunks with
+    // ERR_CERT_AUTHORITY_INVALID instead of simply serving over HTTP.
+    ...(secure ? ["upgrade-insecure-requests"] : []),
   ].join("; ");
 }
 
-let cachedCsp: string | undefined;
+const cachedCsp: Partial<Record<"secure" | "insecure", string>> = {};
 
-function csp(): string {
-  if (!cachedCsp) cachedCsp = buildCsp();
-  return cachedCsp;
+function csp(secure: boolean): string {
+  const key = secure ? "secure" : "insecure";
+  return (cachedCsp[key] ??= buildCsp(secure));
+}
+
+/**
+ * True when the browser reached us over TLS. The app runs behind a TLS-
+ * terminating proxy, so the forwarded header is the authoritative signal and
+ * the request URL's own protocol is the fallback for a direct connection.
+ */
+function isSecureRequest(request: NextRequest): boolean {
+  const forwarded = request.headers.get("x-forwarded-proto");
+  if (forwarded) return forwarded.split(",")[0]?.trim() === "https";
+  return request.nextUrl.protocol === "https:";
 }
 
 /**
@@ -77,7 +95,11 @@ function csp(): string {
  * cross-section: it works identically here and if it's ever needed against a
  * plain fetch `Response`.
  */
-export function applySecurityHeaders(headers: Headers): void {
+export function applySecurityHeaders(
+  headers: Headers,
+  request: NextRequest,
+): void {
+  const secure = isSecureRequest(request);
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "strict-origin-when-cross-origin");
   headers.set("x-frame-options", "DENY");
@@ -86,11 +108,14 @@ export function applySecurityHeaders(headers: Headers): void {
     "permissions-policy",
     "camera=(), microphone=(), geolocation=(), payment=()",
   );
-  // Only meaningful over TLS; harmless otherwise, and the proxy terminates TLS.
-  headers.set(
-    "strict-transport-security",
-    "max-age=31536000; includeSubDomains",
-  );
+  // Only meaningful over TLS, and sending it from a plain-HTTP origin would
+  // pin browsers to an https:// endpoint that may not serve a valid
+  // certificate yet.
+  if (secure)
+    headers.set(
+      "strict-transport-security",
+      "max-age=31536000; includeSubDomains",
+    );
   if (!headers.has("content-security-policy"))
-    headers.set("content-security-policy", csp());
+    headers.set("content-security-policy", csp(secure));
 }

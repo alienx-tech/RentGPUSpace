@@ -12,7 +12,7 @@ function isPublicApi(pathname: string): boolean {
 export async function proxy(request: NextRequest) {
   const response = await updateSession(request);
   if (!isPublicApi(request.nextUrl.pathname)) {
-    applySecurityHeaders(response.headers);
+    applySecurityHeaders(response.headers, request);
   }
   return response;
 }
